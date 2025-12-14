@@ -2,6 +2,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/i2c.h>
 #include "sensors.h"
+#include "gps.h"
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
@@ -12,9 +13,11 @@ int main(void)
     int err = sensors_init();
     LOG_INF("sensors_init returned %d", err);
 
-    while (1) {
-        int val = sensors_sample_once();
-        LOG_INF("main got %d", val);
-        k_sleep(K_SECONDS(2));
-    }
+    int gps = run_gps();
+
+    //while (1) {
+    //    int val = sensors_sample_once();
+    //    LOG_INF("main got %d", val);
+    //    k_sleep(K_SECONDS(2));
+    //}
 }

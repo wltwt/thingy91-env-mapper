@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 
+// GNSS
+int run_gps(void);
+
 
 
 #ifdef __cplusplus

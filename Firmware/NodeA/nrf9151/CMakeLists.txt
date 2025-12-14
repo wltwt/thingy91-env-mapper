@@ -6,6 +6,7 @@ project(NodeA)
 target_sources(app PRIVATE 
     src/main.c
     src/sensors.c
+    src/gps.c
 )
 
 target_include_directories(app PRIVATE
