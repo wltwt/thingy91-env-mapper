@@ -1,0 +1,7 @@
+&i2c2 {
+    status = "okay";
+};
+
+&bme680 {
+    status = "okay";
+};
