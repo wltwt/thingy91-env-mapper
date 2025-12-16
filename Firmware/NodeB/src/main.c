@@ -7,6 +7,8 @@
 #include <zephyr/sys/byteorder.h>
 #include <string.h>
 
+#include <zephyr/sys/timeutil.h>
+#include <math.h>
 
 LOG_MODULE_REGISTER(node_b, LOG_LEVEL_INF);
 
@@ -16,6 +18,35 @@ LOG_MODULE_REGISTER(node_b, LOG_LEVEL_INF);
 
 #define PROTO_MAGIC 0x42
 #define PROTO_VER 1
+
+static int8_t last_rssi;
+
+
+// Sample struct
+struct node_b_sample{
+        int64_t ts_ms;
+        uint16_t seq; 
+        float t_c; 
+        float rh; 
+        int32_t lat_e7; 
+        int32_t lon_e7; 
+        uint8_t src;
+        int8_t rssi;
+};
+
+
+// Sample handler
+static void handle_sample(struct node_b_sample *s){
+        LOG_INF(
+                "SAMPLE | ts=%lld | src=%u | seq=%u | T=%.2f | RH=%.2f | RSSI=%d",
+                s->ts_ms,
+                s->src,
+                s->seq,
+                s->t_c,
+                s->rh,
+                s->rssi
+        );
+}
 
 
 // Manufacrurer data format struct - ESP32
@@ -45,50 +76,63 @@ typedef struct __packed adv_mfg_data {
 
 
 // Parsec function for ESP32
-static void parse_legacy_esp32(const uint8_t *data, uint8_t len){
+static void parse_legacy_esp32(const uint8_t *data, uint8_t len, int8_t rssi){
+
         if (len < sizeof(legacy_payload_t)){
-                LOG_WRN("Legacy payload too short (%u)", len);
                 return;
         }
 
         legacy_payload_t p;
         memcpy(&p, data, sizeof(p));
 
-        if (p.company_id != COMPANY_ID || p.node_id != NODE_ID_A){
+        if (p.company_id != COMPANY_ID){
                 return;
         }
 
-        LOG_INF("Legacy ESP32 | seq=%u | temp=%.2f C",
-                p.seq,
-                p.temperature / 100.0f);
+        struct node_b_sample s = {0};
+
+        s.ts_ms = k_uptime_get();
+        s.seq = p.seq;
+        s.t_c = p.temperature / 100.0f;
+        s.rh = NAN;  // Dont send
+        s.lat_e7 = 0;
+        s.lon_e7 = 0; 
+        s.src = p.node_id;
+        s.rssi = rssi;
+
+
+        handle_sample(&s);
 }
 
 
 // Parsec function for Node A
+static void parse_adv_mfg_v1(const uint8_t *data, uint8_t len, int8_t rssi){
 
-static void parse_adv_mfg_v1(const uint8_t *data, uint8_t len){
         if (len < sizeof(adv_mfg_data_type)){
-                LOG_WRN("adv_mfg_data_type too short (%u)", len);
                 return; 
         }
 
         adv_mfg_data_type p;
         memcpy(&p, data, sizeof(p));
 
-        if (p.company_code != COMPANY_ID){
+        if (p.company_code != COMPANY_ID || p.magic != PROTO_MAGIC || p.ver != PROTO_VER){
                 return; 
         }
 
-        if (p.magic != PROTO_MAGIC || p.ver != PROTO_VER){
-                LOG_WRN("Unknown protocol magic=0x%02X ver=%u", p.magic, p.ver);
-                return;
-        }
+        struct node_b_sample s = {0};
 
-        LOG_INF("ADV v1 | src=%u | seq=%u | T=%.2fC | RH=%0.2f%%",
-                p.src,
-                p.seq,
-                p.t_c_e2 / 100.0f,
-                p.rh_e2 / 100.0f);
+
+
+        s.ts_ms = k_uptime_get();
+        s.seq = p.seq;
+        s.t_c = p.t_c_e2 / 100.0f;
+        s.rh = p.rh_e2 / 100.0f; 
+        s.lat_e7 = p.lat_e7;
+        s.lon_e7 = p.lon_e7;
+        s.src = p.src;
+        s.rssi = rssi;
+
+        handle_sample(&s);
 }
 
 
@@ -106,11 +150,11 @@ static bool ad_parse_cb(struct bt_data *data, void *user_data)
 
         // Dispatch based on payload length
         if (data->data_len == sizeof(legacy_payload_t)) {
-                parse_legacy_esp32(data->data, data->data_len);
+                parse_legacy_esp32(data->data, data->data_len, last_rssi);
                 
         }
         else if (data->data_len >= sizeof(adv_mfg_data_type)) {
-                parse_adv_mfg_v1(data->data, data->data_len);
+                parse_adv_mfg_v1(data->data, data->data_len, last_rssi);
         }
         else{
                 LOG_WRN("Unknown manufacturer payload length (%u)", data->data_len);
@@ -121,18 +165,16 @@ static bool ad_parse_cb(struct bt_data *data, void *user_data)
 
 
 
+
 // Callback: Advertising packet is recieved
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type, struct net_buf_simple *buf)
 {
         ARG_UNUSED(addr);
-        ARG_UNUSED(rssi);
         ARG_UNUSED(adv_type); 
 
-        char addr_str[BT_ADDR_LE_STR_LEN];
 
-        bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+        last_rssi = rssi;
 
-        LOG_INF("ADV from %s | RSSI %d dBm", addr_str, rssi);
 
         bt_data_parse(buf, ad_parse_cb, NULL);
 }
