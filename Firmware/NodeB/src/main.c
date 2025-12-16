@@ -5,6 +5,7 @@
 #include <zephyr/bluetooth/hci.h>
 
 #include <zephyr/sys/byteorder.h>
+#include <string.h>
 
 
 LOG_MODULE_REGISTER(node_b, LOG_LEVEL_INF);
@@ -13,8 +14,20 @@ LOG_MODULE_REGISTER(node_b, LOG_LEVEL_INF);
 #define COMPANY_ID 0xFFFF
 #define NODE_ID_A 1 
 
+#define PROTO_MAGIC 0x42
+#define PROTO_VER 1
 
-// Manufacturer data format - NodeA
+
+// Manufacrurer data format struct - ESP32
+typedef struct __packed legacy_payload {
+    uint16_t company_id;
+    uint8_t  node_id;
+    uint8_t  seq;
+    int16_t  temperature;
+} legacy_payload_t;
+
+
+// Manufacturer data format struct - NodeA
 typedef struct __packed adv_mfg_data {
 
     uint16_t company_code; /* Company Identifier Code */
@@ -31,6 +44,55 @@ typedef struct __packed adv_mfg_data {
 
 
 
+// Parsec function for ESP32
+static void parse_legacy_esp32(const uint8_t *data, uint8_t len){
+        if (len < sizeof(legacy_payload_t)){
+                LOG_WRN("Legacy payload too short (%u)", len);
+                return;
+        }
+
+        legacy_payload_t p;
+        memcpy(&p, data, sizeof(p));
+
+        if (p.company_id != COMPANY_ID || p.node_id != NODE_ID_A){
+                return;
+        }
+
+        LOG_INF("Legacy ESP32 | seq=%u | temp=%.2f C",
+                p.seq,
+                p.temperature / 100.0f);
+}
+
+
+// Parsec function for Node A
+
+static void parse_adv_mfg_v1(const uint8_t *data, uint8_t len){
+        if (len < sizeof(adv_mfg_data_type)){
+                LOG_WRN("adv_mfg_data_type too short (%u)", len);
+                return; 
+        }
+
+        adv_mfg_data_type p;
+        memcpy(&p, data, sizeof(p));
+
+        if (p.company_code != COMPANY_ID){
+                return; 
+        }
+
+        if (p.magic != PROTO_MAGIC || p.ver != PROTO_VER){
+                LOG_WRN("Unknown protocol magic=0x%02X ver=%u", p.magic, p.ver);
+                return;
+        }
+
+        LOG_INF("ADV v1 | src=%u | seq=%u | T=%.2fC | RH=%0.2f%%",
+                p.src,
+                p.seq,
+                p.t_c_e2 / 100.0f,
+                p.rh_e2 / 100.0f);
+}
+
+
+
 // Manufacturer parser 
 static bool ad_parse_cb(struct bt_data *data, void *user_data)
 {
@@ -41,32 +103,18 @@ static bool ad_parse_cb(struct bt_data *data, void *user_data)
                 return true; // continue parsing
         }
 
-        if (data->data_len < 6) {
-                LOG_WRN("Manufacturer data too short (%u)", data->data_len);
-                return false; 
+
+        // Dispatch based on payload length
+        if (data->data_len == sizeof(legacy_payload_t)) {
+                parse_legacy_esp32(data->data, data->data_len);
+                
         }
-
-        const uint8_t *d = data->data; 
-
-        /* NOTE: 
-        * Current parsing matches ESP32 Node A 
-        * When Node A is available, replace this section 
-        * with parsing og adv_mfg_data_type (see README)
-        */
-
-        uint16_t company_id = sys_get_le16(&d[0]); 
-        uint8_t node_id = d[2];
-        uint8_t seq = d[3]; 
-        int16_t temp_raw = sys_get_le16(&d[4]); 
-
-        if (company_id !=  COMPANY_ID || node_id != NODE_ID_A){
-                return false; 
+        else if (data->data_len >= sizeof(adv_mfg_data_type)) {
+                parse_adv_mfg_v1(data->data, data->data_len);
         }
-
-        LOG_INF("Node A | seq=%u | temp_raw=%d (%.2f C)",
-                seq,
-                temp_raw,
-                temp_raw / 100.0f);
+        else{
+                LOG_WRN("Unknown manufacturer payload length (%u)", data->data_len);
+        }
 
         return false; // Stop parsing this packet
 }
