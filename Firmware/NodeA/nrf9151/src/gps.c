@@ -30,13 +30,23 @@ LOG_MODULE_REGISTER(gps, LOG_LEVEL_INF);
 static struct nrf_modem_gnss_pvt_data_frame pvt_data;
 
 
-
 static int64_t gnss_start_time;
+
+
 static bool first_fix = false;
+static bool initialized = false;
+
+
+static struct gps_sample payload;
 
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
+static int32_t deg_to_e7(double deg)
+{
+    // robust nok til dette bruket
+    return (int32_t)(deg * 10000000.0);
+}
 
 static int modem_configure(void)
 {
@@ -53,8 +63,12 @@ static int modem_configure(void)
 	return 0;
 }
 
-static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
+static void set_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 {
+	payload.lat_e7 = deg_to_e7(pvt_data->latitude);
+	payload.lon_e7 = deg_to_e7(pvt_data->longitude);
+
+	/*
 	LOG_INF("Latitude:       %.06f", pvt_data->latitude);
 	LOG_INF("Longitude:      %.06f", pvt_data->longitude);
 	LOG_INF("Altitude:       %.01f m", (double)pvt_data->altitude);
@@ -63,98 +77,100 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	       pvt_data->datetime.minute,
 	       pvt_data->datetime.seconds,
 	       pvt_data->datetime.ms);
+
+	*/
 }
 
 static void gnss_event_handler(int event)
 {
-	int err;
+    int err;
 
-	switch (event) {
-	/* STEP 7 - On a PVT event, confirm if PVT data is a valid fix */
-	case NRF_MODEM_GNSS_EVT_PVT:
-		LOG_INF("Searching...");
-		/* STEP 15 - Print satellite information */
-		int num_satellites = 0;
-		for (int i = 0; i < 12 ; i++) {
-			if (pvt_data.sv[i].signal != 0) {
-				LOG_INF("sv: %d, cn0: %d, signal: %d", pvt_data.sv[i].sv, pvt_data.sv[i].cn0, pvt_data.sv[i].signal);
-				num_satellites++;
-			}
-		}
-		LOG_INF("Number of current satellites: %d", num_satellites);
-		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
-		if (err) {
-			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
-			return;
-		}
-		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
-			dk_set_led_on(DK_LED1);
-			print_fix_data(&pvt_data);
-			/* STEP 12.3 - Print the time to first fix */
-			if (!first_fix) {
-				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
-				first_fix = true;
-			}
-			return;
-		}
-		break;
-	/* STEP 7.2 - Log when the GNSS sleeps and wakes up */
-	case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
-		LOG_INF("GNSS has woken up");
-		break;
-	case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
-		LOG_INF("GNSS enter sleep after fix");
-		break;
-	default:
-		break;
-	}
+    switch (event) {
+    case NRF_MODEM_GNSS_EVT_PVT:
+        err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
+        if (err) {
+            LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
+            return;
+        }
+
+        // (valgfritt) satellittlogging, nå med fersk pvt_data
+        int num_satellites = 0;
+        for (int i = 0; i < 12; i++) {
+            if (pvt_data.sv[i].signal != 0) {
+                num_satellites++;
+            }
+        }
+        LOG_INF("Satellites: %d", num_satellites);
+
+        if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
+            payload.fix_valid = true;
+            payload.ts_ms = k_uptime_get();
+            set_fix_data(&pvt_data);
+
+            if (!first_fix) {
+                LOG_INF("Time to first fix: %lld s",
+                        (k_uptime_get() - gnss_start_time) / 1000);
+                first_fix = true;
+            }
+        } else {
+            payload.fix_valid = false;
+            payload.ts_ms = k_uptime_get();
+            payload.lat_e7 = 0;
+            payload.lon_e7 = 0;
+        }
+        break;
+
+    case NRF_MODEM_GNSS_EVT_PERIODIC_WAKEUP:
+        LOG_INF("GNSS has woken up");
+        break;
+
+    case NRF_MODEM_GNSS_EVT_SLEEP_AFTER_FIX:
+        LOG_INF("GNSS enter sleep after fix");
+        break;
+
+    default:
+        break;
+    }
 }
 
-int run_gps(void) {
-    	int err;
 
-	if (dk_leds_init() != 0) {
-		LOG_ERR("Failed to initialize the LEDs Library");
-	}
+int gps_init(void)
+{
+    int err;
 
-	err = modem_configure();
-	if (err) {
-		LOG_ERR("Failed to configure the modem");
-		return 0;
-	}
+    err = modem_configure();
+    if (err) return err;
 
-	/* STEP 8 - Activate only the GNSS stack */
-	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) {
-		LOG_ERR("Failed to activate GNSS functional mode");
-		return 0;
-	}
+    err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS);
+    if (err) return err;
 
-	/* STEP 9 - Register the GNSS event handler */
-	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0) {
-		LOG_ERR("Failed to set GNSS event handler");
-		return 0;
-	}
+    err = nrf_modem_gnss_event_handler_set(gnss_event_handler);
+    if (err) return err;
 
-	/* STEP 10 - Set the GNSS fix interval and GNSS fix retry period */
-	if (nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL) != 0) {
-		LOG_ERR("Failed to set GNSS fix interval");
-		return 0;
-	}
+    err = nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL);
+    if (err) LOG_WRN("fix_interval_set err=%d", err);
 
-	if (nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT) != 0) {
-		LOG_ERR("Failed to set GNSS fix retry");
-		return 0;
-	}
+    err = nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT);
+    if (err) LOG_WRN("fix_retry_set err=%d", err);
 
-	/* STEP 11 - Start the GNSS receiver*/
-	LOG_INF("Starting GNSS");
-	if (nrf_modem_gnss_start() != 0) {
-		LOG_ERR("Failed to start GNSS");
-		return 0;
-	}
+    gnss_start_time = k_uptime_get();
 
-	/* STEP 12.2 - Log the current system uptime */
-	gnss_start_time = k_uptime_get();
+    LOG_INF("Starting GNSS");
+    err = nrf_modem_gnss_start();
+    if (err) return err;
 
+    payload.fix_valid = false;
+    payload.lat_e7 = 0;
+    payload.lon_e7 = 0;
+    payload.ts_ms = k_uptime_get();
+    initialized = true;
+
+    return 0;
+}
+
+
+int get_gps_payload(struct gps_sample *pkt) {
+	if (!initialized) return -EINVAL;
+	*pkt = payload;
 	return 0;
 }

@@ -32,6 +32,8 @@
 #define PKT_MAGIC 0xA5
 #define PKT_VER   1
 
+
+/* Skeleton structure fo */
 struct __packed env_pkt_wire {
     uint8_t  magic;        // 0xA5
     uint8_t  ver;          // 1
@@ -146,48 +148,47 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
     struct uart_data_t *buf;
 
     switch (evt->type) {
+        case UART_RX_RDY:
+            //printk("EVT RX_RDY\n");
 
-    case UART_RX_RDY:
-        //printk("EVT RX_RDY\n");
+            buf = CONTAINER_OF(evt->data.rx.buf, struct uart_data_t, data[0]);
+            buf->len += evt->data.rx.len;
+            //printk("RX_RDY len=%u\n", buf->len);
+            break;
 
-        buf = CONTAINER_OF(evt->data.rx.buf, struct uart_data_t, data[0]);
-        buf->len += evt->data.rx.len;
-		//printk("RX_RDY len=%u\n", buf->len);
-        break;
+        case UART_RX_DISABLED:
+            //printk("EVT RX_DISABLED\n");
+            buf = k_malloc(sizeof(*buf));
+            if (!buf) {
+                k_work_reschedule(&uart_work, UART_WAIT_FOR_BUF_DELAY);
+                return;
+            }
+            buf->len = 0;
+            uart_rx_enable(uart, buf->data, sizeof(buf->data), UART_WAIT_FOR_RX);
+            break;
 
-    case UART_RX_DISABLED:
-		//printk("EVT RX_DISABLED\n");
-        buf = k_malloc(sizeof(*buf));
-        if (!buf) {
-            k_work_reschedule(&uart_work, UART_WAIT_FOR_BUF_DELAY);
-            return;
-        }
-        buf->len = 0;
-        uart_rx_enable(uart, buf->data, sizeof(buf->data), UART_WAIT_FOR_RX);
-        break;
+        case UART_RX_BUF_REQUEST:
+            //printk("EVT BUF_REQUEST\n");
+            buf = k_malloc(sizeof(*buf));
+            if (!buf) {
+                return;
+            }
+            buf->len = 0;
+            uart_rx_buf_rsp(uart, buf->data, sizeof(buf->data));
+            break;
 
-    case UART_RX_BUF_REQUEST:
-	    //printk("EVT BUF_REQUEST\n");
-        buf = k_malloc(sizeof(*buf));
-        if (!buf) {
-            return;
-        }
-        buf->len = 0;
-        uart_rx_buf_rsp(uart, buf->data, sizeof(buf->data));
-        break;
+        case UART_RX_BUF_RELEASED:
+            //printk("EVT BUF_RELEASED\n");
+            buf = CONTAINER_OF(evt->data.rx_buf.buf, struct uart_data_t, data[0]);
+            if (buf->len > 0) {
+                k_fifo_put(&fifo_uart_rx_data, buf);
+            } else {
+                k_free(buf);
+            }
+            break;
 
-    case UART_RX_BUF_RELEASED:
-        //printk("EVT BUF_RELEASED\n");
-        buf = CONTAINER_OF(evt->data.rx_buf.buf, struct uart_data_t, data[0]);
-        if (buf->len > 0) {
-            k_fifo_put(&fifo_uart_rx_data, buf);
-        } else {
-            k_free(buf);
-        }
-        break;
-
-    default:
-        break;
+        default:
+            break;
     }
 }
 
@@ -420,7 +421,6 @@ int main(void)
 
 
 		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
-
 	}
 	*/
 }
