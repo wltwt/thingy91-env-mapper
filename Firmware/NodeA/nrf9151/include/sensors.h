@@ -5,8 +5,15 @@
 extern "C" {
 #endif
 
+struct env_sample {
+    int16_t  t_c_e2;
+    uint16_t rh_e2;
+};
+
+
 int sensors_init(void);
-int sensors_sample_once(void);
+int update_env_sample(void);
+int get_env(struct env_sample *pkt);
 
 #ifdef __cplusplus
 }
