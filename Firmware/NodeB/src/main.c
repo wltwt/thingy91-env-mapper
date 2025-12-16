@@ -14,6 +14,22 @@ LOG_MODULE_REGISTER(node_b, LOG_LEVEL_INF);
 #define NODE_ID_A 1 
 
 
+// Manufacturer data format - NodeA
+typedef struct __packed adv_mfg_data {
+
+    uint16_t company_code; /* Company Identifier Code */
+    uint8_t  magic;        /* Protocol identifier */
+    uint8_t  ver;          /* Protocol version */
+    uint16_t seq;          /* Sequence number */
+    int16_t  t_c_e2;       /* Temperature (°C ×100) */
+    uint16_t rh_e2;        /* Humidity (% ×100) */
+    int32_t  lat_e7;       /* Latitude ×1e7 */
+    int32_t  lon_e7;       /* Longitude ×1e7 */
+    uint8_t  src;          /* Source / team number */
+
+} adv_mfg_data_type;
+
+
 
 // Manufacturer parser 
 static bool ad_parse_cb(struct bt_data *data, void *user_data)
@@ -31,6 +47,12 @@ static bool ad_parse_cb(struct bt_data *data, void *user_data)
         }
 
         const uint8_t *d = data->data; 
+
+        /* NOTE: 
+        * Current parsing matches ESP32 Node A 
+        * When Node A is available, replace this section 
+        * with parsing og adv_mfg_data_type (see README)
+        */
 
         uint16_t company_id = sys_get_le16(&d[0]); 
         uint8_t node_id = d[2];
@@ -76,6 +98,10 @@ int main(void)
         }
 
         LOG_INF("Bluetooth initialized");
+
+
+        // Replace to: Using adv_mfg_data_type protocol 
+        LOG_INF("NOTE: Using legacy ESP32 manufacturer format");
 
 
         // Scan parameters
