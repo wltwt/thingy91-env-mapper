@@ -128,6 +128,12 @@ static void scan_cb(const bt_addr_le_t *addr, int8_t rssi, uint8_t adv_type, str
         ARG_UNUSED(rssi);
         ARG_UNUSED(adv_type); 
 
+        char addr_str[BT_ADDR_LE_STR_LEN];
+
+        bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+
+        LOG_INF("ADV from %s | RSSI %d dBm", addr_str, rssi);
+
         bt_data_parse(buf, ad_parse_cb, NULL);
 }
                         
