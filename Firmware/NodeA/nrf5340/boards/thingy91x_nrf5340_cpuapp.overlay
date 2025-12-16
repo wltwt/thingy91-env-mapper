@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
-
+/* 
 / {
 	chosen {
 		zephyr,console = &cdc_acm_uart0;
@@ -14,4 +14,11 @@
 	cdc_acm_uart0: cdc_acm_uart0 {
 		compatible = "zephyr,cdc-acm-uart";
 	};
+};
+
+*/
+
+&uart0 {
+    status = "okay";
+    current-speed = <115200>;
 };
