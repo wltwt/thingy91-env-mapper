@@ -1,0 +1,10 @@
+name: blemap
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pyserial
+  - dash
+  - plotly
+  - pandas
+prefix: /home/wlt/miniconda3/envs/blemap
