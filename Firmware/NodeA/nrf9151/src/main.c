@@ -101,16 +101,21 @@ static void uart_send_pkt_poll(const struct device *uart, const struct state_pay
 int main(void)
 {
 
-    int err = sensors_init();
-    if (err != 0) {
-        return 0;
-    }
- 
+    int err = 0;
+
     err = gps_init();
     if (err != 0) {
         LOG_ERR("GPS ERROR");
         return 0;
     }
+
+
+
+    err = sensors_init();
+    if (err != 0) {
+        return 0;
+    }
+ 
 
 
     if (!device_is_ready(uart)) return 0;

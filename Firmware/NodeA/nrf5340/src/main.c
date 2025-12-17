@@ -95,7 +95,6 @@ static const struct bt_le_adv_param *adv_param =
 			NULL); /* Set to NULL for undirected advertising */
 
 
-
 static adv_mfg_data_type adv_payload = { COMPANY_ID_CODE, 0x00 };
 
 LOG_MODULE_REGISTER(ble, LOG_LEVEL_INF);
@@ -184,6 +183,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
         case UART_RX_BUF_RELEASED:
             //printk("EVT BUF_RELEASED\n");
             buf = CONTAINER_OF(evt->data.rx_buf.buf, struct uart_data_t, data[0]);
+            printk("UART released len=%u\n", buf->len);
             if (buf->len > 0) {
                 k_fifo_put(&fifo_uart_rx_data, buf);
             } else {
@@ -255,11 +255,12 @@ static bool try_extract_one(struct state_uart_wire *out)
 
     uint8_t crc = crc8_atm((const uint8_t*)&p, offsetof(struct state_uart_wire, crc8));
     if (crc != p.crc8) {
-        // CRC feil: dropp magic-byten og resync
+        printk("CRC mismatch: calc=%02x pkt=%02x\n", crc, p.crc8);
         memmove(acc, acc + 1, acc_len - 1);
         acc_len -= 1;
         return false;
     }
+
 
     // valid: returner den og fjern fra buffer
     *out = p;
@@ -275,8 +276,8 @@ static uint16_t seq = 0;
 
 static void update_adv_from_uart_pkt(const struct state_uart_wire *p)
 {
-    adv_payload.company_code = COMPANY_ID_CODE;
-    adv_payload.magic = p->magic;
+    adv_payload.company_code = sys_cpu_to_le16(COMPANY_ID_CODE);
+    adv_payload.magic = PKT_MAGIC;
     adv_payload.ver   = PROTOCOL_VERSION;
 
     adv_payload.seq    = seq++;
@@ -293,6 +294,18 @@ static void uart_rx_thread(void)
 {
     for (;;) {
         struct uart_data_t *buf = k_fifo_get(&fifo_uart_rx_data, K_FOREVER);
+        printk("RX14: ");
+        for (int i = 0; i < buf->len; i++) {
+            printk("%02x ", buf->data[i]);
+        }
+        printk("\n");
+
+
+        size_t space = sizeof(acc) - acc_len;
+        if (buf->len > space) {
+            acc_len = 0; // resync
+            space = sizeof(acc);
+        }
 
         // append
         size_t copy = MIN(buf->len, sizeof(acc) - acc_len);
