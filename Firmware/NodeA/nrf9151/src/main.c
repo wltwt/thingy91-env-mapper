@@ -19,19 +19,39 @@
 #define PKT_VER   1
 #define SEND_INTERVAL 2
 
+/* Initiate main logging */
+LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
+
+
+/*
 struct __packed env_pkt_wire {
     uint8_t  magic;        // 0xA5
-    uint8_t  ver;          // 1
-    uint16_t seq_le;       // little-endian
+    //uint8_t  ver;          // 1
+    //uint16_t seq_le;       // little-endian
     int16_t  t_c_e2_le;    // temp * 100
     uint16_t rh_e2_le;     // RH * 100
     int32_t  lat_e7_le;    // lat * 1e7
     int32_t  lon_e7_le;    // lon * 1e7
-    uint8_t  src;          // team id
+    //uint8_t  src;          // team id
     uint8_t  crc8;         // over bytes [magic..src]
 };
 
-BUILD_ASSERT(sizeof(struct env_pkt_wire) == 1+1+2+2+2+4+4+1+1, "pkt size changed");
+*/
+
+
+struct __packed state_payload_wire {
+    uint8_t  magic;        // 0xA5
+    int16_t  t_c_e2_le;    // temp * 100
+    uint16_t rh_e2_le;     // RH * 100
+    int32_t  lat_e7_le;    // lat * 1e7
+    int32_t  lon_e7_le;    // lon * 1e7
+    uint8_t  crc8;         // over bytes [magic..src]
+};
+
+
+//BUILD_ASSERT(sizeof(struct env_pkt_wire) == 1+1+2+2+2+4+4+1+1, "pkt size changed");
+
+BUILD_ASSERT(sizeof(struct state_payload_wire) == 1+2+2+4+4+1, "pkt size changed");
 
 static const struct device *uart = DEVICE_DT_GET(DT_NODELABEL(uart0));
 
@@ -48,30 +68,27 @@ static uint8_t crc8_atm(const uint8_t *data, size_t len)
     return crc;
 }
 
-LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
-static uint16_t g_seq = 0;
 
-static void build_pkt(struct env_pkt_wire *p,
+static void build_pkt(struct state_payload_wire *p,
                       int16_t t_c_e2, uint16_t rh_e2,
-                      int32_t lat_e7, int32_t lon_e7,
-                      uint8_t src)
+                      int32_t lat_e7, int32_t lon_e7)
 {
     p->magic = PKT_MAGIC;
-    p->ver   = PKT_VER;
-    p->seq_le    = sys_cpu_to_le16(g_seq++);
+    //p->ver   = PKT_VER;
+    //p->seq_le    = sys_cpu_to_le16(g_seq++);
     p->t_c_e2_le = sys_cpu_to_le16((int16_t)t_c_e2);
     p->rh_e2_le  = sys_cpu_to_le16(rh_e2);
     p->lat_e7_le = sys_cpu_to_le32(lat_e7);
     p->lon_e7_le = sys_cpu_to_le32(lon_e7);
-    p->src = src;
+    //p->src = src;
 
     // CRC over alt uten crc8-feltet
-    p->crc8 = crc8_atm((const uint8_t*)p, offsetof(struct env_pkt_wire, crc8));
+    p->crc8 = crc8_atm((const uint8_t*)p, offsetof(struct state_payload_wire, crc8));
 }
 
 
 
-static void uart_send_pkt_poll(const struct device *uart, const struct env_pkt_wire *p)
+static void uart_send_pkt_poll(const struct device *uart, const struct state_payload_wire *p)
 {
     update_env_sample();
     const uint8_t *b = (const uint8_t*)p;
@@ -83,21 +100,12 @@ static void uart_send_pkt_poll(const struct device *uart, const struct env_pkt_w
 
 int main(void)
 {
-    //LOG_INF("App boot");
-
-    /*
-    int err = sensors_init();
-    LOG_INF("sensors_init returned %d", err);
-
-    int gps = run_gps();
-    */
-
-    
 
     int err = sensors_init();
     if (err != 0) {
         return 0;
     }
+ 
     err = gps_init();
     if (err != 0) {
         LOG_ERR("GPS ERROR");
@@ -107,7 +115,7 @@ int main(void)
 
     if (!device_is_ready(uart)) return 0;
     
-    struct env_pkt_wire pkt;
+    struct state_payload_wire pkt;
     struct env_sample ep;
     struct gps_sample gp;
 
@@ -118,25 +126,24 @@ int main(void)
 
     LOG_INF("temp: %d, hum: %d",ep.t_c_e2, ep.rh_e2);
 
-    
+    /*
+    //disable static test data
     int16_t  t_c_e2 = 2231;        // 22.31°C
     uint16_t rh_e2  = 4890;        // 48.90%
     int32_t  lat_e7 = 599139000;   // 59.9139000
     int32_t  lon_e7 = 107522000;   // 10.7522000
     uint8_t  src    = 3;
     
-
+    */
     
     while (1) {
         get_env(&ep);
         get_gps_payload(&gp);
 
-        build_pkt(&pkt, ep.t_c_e2, ep.rh_e2, gp.lat_e7, gp.lon_e7, src);
+        build_pkt(&pkt, ep.t_c_e2, ep.rh_e2, gp.lat_e7, gp.lon_e7);
         
         uart_send_pkt_poll(uart, &pkt);
         
-        
-        LOG_INF("seq nmbr=%d", g_seq);
         k_sleep(K_SECONDS(SEND_INTERVAL));
     }
 }

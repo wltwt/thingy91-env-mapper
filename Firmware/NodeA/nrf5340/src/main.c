@@ -15,7 +15,7 @@
 
 #include <zephyr/sys/byteorder.h>
 
-#include <dk_buttons_and_leds.h>
+//#include <dk_buttons_and_leds.h>
 
 
 // For UART
@@ -34,6 +34,8 @@
 
 
 /* Skeleton structure fo */
+
+/*
 struct __packed env_pkt_wire {
     uint8_t  magic;        // 0xA5
     uint8_t  ver;          // 1
@@ -46,11 +48,22 @@ struct __packed env_pkt_wire {
     uint8_t  crc8;         // over bytes [magic..src]
 };
 
-BUILD_ASSERT(sizeof(struct env_pkt_wire) == 1+1+2+2+2+4+4+1+1, "pkt size changed");
+*/
+
+
+struct __packed state_uart_wire {
+    uint8_t  magic;        // 0xA5
+    int16_t  t_c_e2_le;
+    uint16_t rh_e2_le;
+    int32_t  lat_e7_le;
+    int32_t  lon_e7_le;
+    uint8_t  crc8;
+};
 
 
 
-
+//BUILD_ASSERT(sizeof(struct env_pkt_wire) == 1+1+2+2+2+4+4+1+1, "pkt size changed");
+BUILD_ASSERT(sizeof(struct state_uart_wire) == 1+2+2+4+4+1, "pkt size changed");
 
 
 /* Nordic company-ID */
@@ -94,27 +107,18 @@ LOG_MODULE_REGISTER(ble, LOG_LEVEL_INF);
 
 #define RUN_STATUS_LED DK_LED1
 #define RUN_LED_BLINK_INTERVAL SEND_INTERVAL
+#define TEAM_ID 4
+#define PROTOCOL_VERSION 1
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
-	/* STEP 3 - Include the Manufacturer Specific Data in the advertising packet. */
+	
+    /* Include the Manufacturer Specific Data in the advertising packet. */
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, (unsigned char *)&adv_payload, sizeof(adv_payload)),
 };
 
 
-/* STEP 4.2.2 - Declare the URL data to include in the scan response */
-/*
-static unsigned char url_data[] = { 0x17, '/', '/', 'a', 'c', 'a', 'd', 'e', 'm',
-				    'y',  '.', 'n', 'o', 'r', 'd', 'i', 'c', 's',
-				    'e',  'm', 'i', '.', 'c', 'o', 'm' };
-*/
-
-/*
-static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_URI, url_data, sizeof(url_data)),
-};
-*/
 
 #define UART_BUF_SIZE 128
 #define UART_WAIT_FOR_RX 50000
@@ -192,6 +196,7 @@ static void uart_cb(const struct device *dev, struct uart_event *evt, void *user
     }
 }
 
+
 static void uart_work_handler(struct k_work *item)
 {
 	struct uart_data_t *buf;
@@ -224,8 +229,7 @@ static uint8_t crc8_atm(const uint8_t *data, size_t len)
 }
 
 
-
-static bool try_extract_one(struct env_pkt_wire *out)
+static bool try_extract_one(struct state_uart_wire *out)
 {
     // finn magic
     size_t i = 0;
@@ -236,20 +240,20 @@ static bool try_extract_one(struct env_pkt_wire *out)
         acc_len -= i;
     }
 
-    if (acc_len < sizeof(struct env_pkt_wire)) return false;
+    if (acc_len < sizeof(struct state_uart_wire)) return false;
 
-    struct env_pkt_wire p;
+    struct state_uart_wire p;
     memcpy(&p, acc, sizeof(p));
 
     // basic checks
-    if (p.magic != PKT_MAGIC || p.ver != PKT_VER) {
+    if (p.magic != PKT_MAGIC) {
         // dropp 1 byte og prøv igjen senere
         memmove(acc, acc + 1, acc_len - 1);
         acc_len -= 1;
         return false;
     }
 
-    uint8_t crc = crc8_atm((const uint8_t*)&p, offsetof(struct env_pkt_wire, crc8));
+    uint8_t crc = crc8_atm((const uint8_t*)&p, offsetof(struct state_uart_wire, crc8));
     if (crc != p.crc8) {
         // CRC feil: dropp magic-byten og resync
         memmove(acc, acc + 1, acc_len - 1);
@@ -267,21 +271,23 @@ static bool try_extract_one(struct env_pkt_wire *out)
 #define LINE_MAX 128
 static char line[LINE_MAX];
 static size_t line_len;
+static uint16_t seq = 0;
 
-static void update_adv_from_uart_pkt(const struct env_pkt_wire *p)
+static void update_adv_from_uart_pkt(const struct state_uart_wire *p)
 {
     adv_payload.company_code = COMPANY_ID_CODE;
     adv_payload.magic = p->magic;
-    adv_payload.ver   = p->ver;
+    adv_payload.ver   = PROTOCOL_VERSION;
 
-    adv_payload.seq    = sys_le16_to_cpu(p->seq_le);
+    adv_payload.seq    = seq++;
     adv_payload.t_c_e2 = (int16_t)sys_le16_to_cpu(p->t_c_e2_le);
     adv_payload.rh_e2  = sys_le16_to_cpu(p->rh_e2_le);
     adv_payload.lat_e7 = (int32_t)sys_le32_to_cpu(p->lat_e7_le);
     adv_payload.lon_e7 = (int32_t)sys_le32_to_cpu(p->lon_e7_le);
-    adv_payload.src    = p->src;
+    adv_payload.src    = TEAM_ID;
 }
 
+static volatile bool bt_ready = false;
 
 static void uart_rx_thread(void)
 {
@@ -294,39 +300,17 @@ static void uart_rx_thread(void)
         acc_len += copy;
 
         // prøv å trekke ut 0..N pakker
-        struct env_pkt_wire p;
+        struct state_uart_wire p;
         while (try_extract_one(&p)) {
-			update_adv_from_uart_pkt(&p);
-			int err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
-			if (err) {
-				printk("adv_update err=%d\n", err);
-			}
-			/*
-            uint16_t seq = sys_le16_to_cpu(p.seq_le);
-            int16_t  t   = (int16_t)sys_le16_to_cpu(p.t_c_e2_le);
-            uint16_t rh  = sys_le16_to_cpu(p.rh_e2_le);
-            int32_t  lat = (int32_t)sys_le32_to_cpu(p.lat_e7_le);
-            int32_t  lon = (int32_t)sys_le32_to_cpu(p.lon_e7_le);
-
-            printk("PKT seq=%u t=%d rh=%u lat=%d lon=%d src=%u\n",
-                   seq, t, rh, lat, lon, p.src);
-
-            // TODO: oppdater adv payload her
-			update_adv_from_uart_pkt(&p);
-
-			            // 2) push til BLE advertising
-            int err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
-            if (err) {
-                printk("adv_update err=%d\n", err);
+            if (bt_ready) {
+                update_adv_from_uart_pkt(&p);
+                
+                int err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
+                if (err) {
+                    printk("adv_update err=%d\n", err);
+                }
             }
-
-            // (valgfritt) debug
-            uint16_t seq = sys_le16_to_cpu(p.seq_le);
-			
-            printk("Updated ADV from seq=%u\n", seq);
-			*/
         }
-
         k_free(buf);
     }
 }
@@ -336,15 +320,13 @@ K_THREAD_DEFINE(uart_rx_thread_id, RX_THREAD_STACK, uart_rx_thread,
                 NULL, NULL, NULL, 7, 0, 0);
 
 
-
 int main(void)
 {
 	int blink_status = 0;
-	int seq_incr = 0;
+	//int seq_incr = 0;
 	int err;
 
 	//LOG_INF("Starting NRF5340 \n");
-
 	printk("nRF5340 UART RX app started\n");
 
 	if (!device_is_ready(uart)) {
@@ -367,7 +349,6 @@ int main(void)
 	ret = uart_rx_enable(uart, rx->data, sizeof(rx->data), UART_WAIT_FOR_RX);
 	printk("uart_rx_enable ret=%d\n", ret);
 
-
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)\n", err);
@@ -378,49 +359,19 @@ int main(void)
 
 	err = bt_le_adv_start(adv_param, ad, ARRAY_SIZE(ad), NULL, 0);
 	if (err) {
-		LOG_ERR("Advertising failed to start (err %d)\n", err);
+        LOG_ERR("Advertising failed to start (err %d)\n", err);
 		return -1;
 	}
+    bt_ready = true;
 
 	LOG_INF("Advertising successfully started\n");
-	while (1) {
+	
+    
+    while (1) {
     	k_sleep(K_SECONDS(1));
 
 		//printk("Sleeping");
 	}
 
-	/*
-	char line[64];
-	int i = 0;
 
-	while (1) {
-		uint8_t c;
-		while (uart_poll_in(uart, &c) == 0) {
-			if (c == '\n' || i == (sizeof(line)-1)) {
-				line[i] = 0;
-				printk("RX: %s\n", line);
-				i = 0;
-			} else if (c != '\r') {
-				line[i++] = (char)c;
-			}
-		}
-		k_sleep(K_MSEC(1));
-	}
-	*/
-
-	/*
-	for (;;) {
-		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
-		seq_incr++;
-		adv_mfg_data.seq = (uint16_t)seq_incr;
-
-		err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
-		if (err) {
-			LOG_ERR("Failed update of advertisment data");
-		}
-
-
-		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
-	}
-	*/
 }
