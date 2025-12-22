@@ -1,6 +1,9 @@
 #pragma once
 
 #include <stdint.h>
+#include <zephyr/toolchain.h>
+#include <zephyr/sys/util.h>
+
 
 #define COMPANY_ID_NORDIC 0x0059
 #define PROTO_MAGIC       0xA5
@@ -29,3 +32,6 @@ typedef struct __packed {
     int32_t  lon_e7;
     uint8_t  src;
 } adv_mfg_data_type;
+
+BUILD_ASSERT(sizeof(adv_mfg_data_type) == 19,
+             "size mismatch (expected 19 bytes)");

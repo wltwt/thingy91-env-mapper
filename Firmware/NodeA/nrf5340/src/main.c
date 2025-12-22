@@ -33,23 +33,6 @@
 #define PKT_VER   1
 
 
-/* Skeleton structure fo */
-
-/*
-struct __packed env_pkt_wire {
-    uint8_t  magic;        // 0xA5
-    uint8_t  ver;          // 1
-    uint16_t seq_le;       // little-endian
-    int16_t  t_c_e2_le;    // temp * 100
-    uint16_t rh_e2_le;     // RH * 100
-    int32_t  lat_e7_le;    // lat * 1e7
-    int32_t  lon_e7_le;    // lon * 1e7
-    uint8_t  src;          // team id
-    uint8_t  crc8;         // over bytes [magic..src]
-};
-
-*/
-
 
 struct __packed state_uart_wire {
     uint8_t  magic;        // 0xA5
@@ -89,7 +72,7 @@ typedef struct __packed adv_mfg_data {
 
 /* Create an LE Advertising Parameters variable */
 static const struct bt_le_adv_param *adv_param =
-	BT_LE_ADV_PARAM(BT_LE_ADV_NCONN, /* No options specified */
+	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_NONE, /* No options specified */
 			3200, /* Min Advertising Interval 2000ms (3200*0.625ms) */
 			8000, /* Max Advertising Interval 5000ms (8000*0.625ms) */
 			NULL); /* Set to NULL for undirected advertising */
@@ -277,14 +260,14 @@ static uint16_t seq = 0;
 static void update_adv_from_uart_pkt(const struct state_uart_wire *p)
 {
     adv_payload.company_code = sys_cpu_to_le16(COMPANY_ID_CODE);
-    adv_payload.magic = PKT_MAGIC;
-    adv_payload.ver   = PROTOCOL_VERSION;
+    adv_payload.magic        = PKT_MAGIC;
+    adv_payload.ver          = PROTOCOL_VERSION;
 
-    adv_payload.seq    = seq++;
-    adv_payload.t_c_e2 = (int16_t)sys_le16_to_cpu(p->t_c_e2_le);
-    adv_payload.rh_e2  = sys_le16_to_cpu(p->rh_e2_le);
-    adv_payload.lat_e7 = (int32_t)sys_le32_to_cpu(p->lat_e7_le);
-    adv_payload.lon_e7 = (int32_t)sys_le32_to_cpu(p->lon_e7_le);
+    adv_payload.seq    = sys_cpu_to_le16(seq++);
+    adv_payload.t_c_e2 = p->t_c_e2_le;
+    adv_payload.rh_e2  = p->rh_e2_le;
+    adv_payload.lat_e7 = p->lat_e7_le;
+    adv_payload.lon_e7 = p->lon_e7_le;
     adv_payload.src    = TEAM_ID;
 }
 
