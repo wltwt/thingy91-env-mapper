@@ -2,6 +2,7 @@
 #include <zephyr/kernel.h>
 #include <stdio.h>
 
+
 K_MSGQ_DEFINE(sample_q, sizeof(struct node_b_sample), 8, 8);
 
 static void sample_to_json(const struct node_b_sample *s,
@@ -22,7 +23,7 @@ static void sample_worker(void)
     while (1) {
         k_msgq_get(&sample_q, &s, K_FOREVER);
         sample_to_json(&s, json, sizeof(json));
-        printk("JSON %s\n", json);
+        printk("%s\n", json);
     }
 }
 
@@ -31,11 +32,10 @@ K_THREAD_DEFINE(sample_thread, 2048, sample_worker,
 
 void sample_push(const struct node_b_sample *s)
 {
-    printk("sample_push called\n");
+    //printk("sample_push called\n");
     k_msgq_put(&sample_q, s, K_NO_WAIT);
 }
 
 void sample_init(void)
 {
-    /* Tom nå – men nyttig senere */
 }

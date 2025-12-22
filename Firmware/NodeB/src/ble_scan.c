@@ -5,6 +5,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/toolchain.h>
 
 static int8_t last_rssi;
 
@@ -38,9 +39,7 @@ static void parse_adv_mfg_v1(const uint8_t *data, uint8_t len, int8_t rssi)
 
 static bool ad_parse_cb(struct bt_data *data, void *user_data)
 {
-    ARG_UNUSED(user_data);
-
-    // printk("AD type %u len %u\n", data->type, data->data_len); DEBUG
+    ARG_UNUSED(user_data); // dummy to make compiler happy
 
     if (data->type != BT_DATA_MANUFACTURER_DATA) {
         return true;
@@ -50,14 +49,15 @@ static bool ad_parse_cb(struct bt_data *data, void *user_data)
     return true;
 }
 
+
 static void scan_cb(const bt_addr_le_t *addr, int8_t rssi,
-                    uint8_t adv_type, struct net_buf_simple *buf)
+                    uint8_t adv_type, struct net_buf_simple *buf) 
 {
+    //printk("scan_cb: rssi=%d adv_type=%u len=%u\n", rssi, adv_type, buf->len);
     ARG_UNUSED(addr);
     ARG_UNUSED(adv_type);
 
-    // printk("scan_cb RSSI %d len %u\n", rssi, buf->len); Debug
-
+    
     last_rssi = rssi;
     bt_data_parse(buf, ad_parse_cb, NULL);
 }

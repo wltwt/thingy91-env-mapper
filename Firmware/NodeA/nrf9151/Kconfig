@@ -10,7 +10,7 @@ menu "cellfund Lesson 6 Exercise"
 config GNSS_PERIODIC_INTERVAL
     int "Fix interval..."
     range 10 65535
-    default 120
+    default 30
 
 	help
 	  Fix interval (in seconds) for periodic fixes.
@@ -19,7 +19,7 @@ config GNSS_PERIODIC_INTERVAL
 config GNSS_PERIODIC_TIMEOUT
 	int "Fix timeout for periodic GPS fixes"
 	range 0 65535
-	default 480
+	default 0
 	help
 	  Fix timeout (in seconds) for periodic fixes.
 	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
